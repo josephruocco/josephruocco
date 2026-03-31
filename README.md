@@ -1,7 +1,7 @@
 # Joseph Ruocco
 
-Custom branch-aware contributions graph for the last 365 days.
+Official GitHub contributions plus extra branch-only commits, rendered in a GitHub-style dark heatmap.
 
 ![Branch contributions](assets/branch-contributions.svg)
 
-This graph is generated from `git log --all`, so it can include work that lives only on non-default branches.
+This graph keeps the normal public contribution history and adds branch-only commits on top.

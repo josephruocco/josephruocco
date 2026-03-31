@@ -11,6 +11,8 @@ permissions:
 jobs:
   update-graph:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_USERNAME: ${{ github.repository_owner }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -24,10 +26,9 @@ jobs:
 
       - name: Generate graph
         run: python3 generate_graph.py
-        working-directory: github-branch-counter
 
       - name: Commit updated SVG
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Update branch contributions graph"
-          file_pattern: github-branch-counter/assets/branch-contributions.svg
+          file_pattern: assets/branch-contributions.svg
