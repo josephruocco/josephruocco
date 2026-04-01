@@ -13,3 +13,7 @@ Run `./scripts/update_profile_graph.sh` to regenerate the SVG and push the profi
 ## Exclude Paths
 
 Edit `.branch-scan-ignore` to skip repos or folders from the local crawl.
+
+## Local Automation
+
+Run `./scripts/install_launch_agent.sh` to install a daily `launchd` job on this Mac.
