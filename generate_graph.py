@@ -37,10 +37,27 @@ LEVELS = {
 }
 WEEKDAY_LABELS = {1: "Mon", 3: "Wed", 5: "Fri"}
 MONTH_LABELS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+PRUNE_DIRS = {
+    ".Trash",
+    ".cache",
+    ".codex",
+    ".npm",
+    ".pnpm-store",
+    ".vscode",
+    "Applications",
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Library",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+}
 
 
-def run_git(*args: str) -> str:
-    return subprocess.check_output(["git", "-C", str(ROOT), *args], text=True).strip()
+def run_git(repo_path: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(repo_path), *args], text=True).strip()
 
 
 def get_username() -> str:
@@ -48,7 +65,7 @@ def get_username() -> str:
     if env_username:
         return env_username
 
-    remote = run_git("remote", "get-url", "origin")
+    remote = run_git(ROOT, "remote", "get-url", "origin")
     match = re.search(r"github\.com[:/]([^/]+)/([^/.]+)(?:\.git)?$", remote)
     if not match:
         raise RuntimeError("Could not determine GitHub username from origin remote")
@@ -79,24 +96,64 @@ def fetch_official_contributions(username: str) -> dict[str, int]:
     return counts
 
 
-def get_default_refs() -> list[str]:
-    refs_output = run_git("for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
+def iter_repo_roots(scan_root: Path) -> list[Path]:
+    repos: list[Path] = []
+    seen: set[Path] = set()
+
+    for current_root, dirnames, _ in os.walk(scan_root):
+        current = Path(current_root)
+        dirnames[:] = [name for name in dirnames if name not in PRUNE_DIRS]
+
+        if ".git" in dirnames:
+            resolved = current.resolve()
+            if resolved not in seen:
+                repos.append(resolved)
+                seen.add(resolved)
+            dirnames[:] = []
+
+    if ROOT.resolve() not in seen:
+        repos.append(ROOT.resolve())
+    return sorted(repos)
+
+
+def get_default_refs(repo_path: Path) -> list[str]:
+    refs_output = run_git(repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
     refs = [line.strip() for line in refs_output.splitlines() if line.strip()]
-    preferred = {"main", "master", "gh-pages", "origin/main", "origin/master", "origin/gh-pages"}
-    default_refs = [ref for ref in refs if ref in preferred]
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    origin_head = result.stdout.strip() if result.returncode == 0 else ""
+
+    preferred = [origin_head, "main", "master", "gh-pages", "origin/main", "origin/master", "origin/gh-pages"]
+    default_refs = [ref for ref in preferred if ref and ref in refs]
     if not default_refs and refs:
         default_refs = [refs[0]]
     return default_refs
 
 
-def get_branch_only_counts() -> Counter[str]:
-    default_refs = get_default_refs()
-    cmd = ["git", "-C", str(ROOT), "log", "--all", "--date=short", "--pretty=format:%ad"]
+def get_branch_only_counts_for_repo(repo_path: Path) -> Counter[str]:
+    default_refs = get_default_refs(repo_path)
+    cmd = ["git", "-C", str(repo_path), "log", "--all", "--date=short", "--pretty=format:%ad"]
     if default_refs:
         cmd.append("--not")
         cmd.extend(default_refs)
     output = subprocess.check_output(cmd, text=True)
     return Counter(line.strip() for line in output.splitlines() if line.strip())
+
+
+def get_branch_only_counts(scan_root: Path) -> tuple[Counter[str], list[Path]]:
+    combined: Counter[str] = Counter()
+    repos = iter_repo_roots(scan_root)
+    for repo_path in repos:
+        try:
+            combined.update(get_branch_only_counts_for_repo(repo_path))
+        except subprocess.CalledProcessError:
+            continue
+    return combined, repos
 
 
 def contribution_level(count: int) -> int:
@@ -207,7 +264,7 @@ def build_legend(width: int) -> str:
     )
 
 
-def render_svg(days: list[dict[str, int | date]], username: str) -> str:
+def render_svg(days: list[dict[str, int | date]], username: str, repo_count: int) -> str:
     weeks = ((len(days) - 1) // 7) + 1
     width = LEFT + weeks * (CELL + GAP) + RIGHT
     height = TOP + 7 * (CELL + GAP) + BOTTOM + 18
@@ -223,7 +280,7 @@ def render_svg(days: list[dict[str, int | date]], username: str) -> str:
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="Merged contribution graph for {username}">
   <rect width="100%" height="100%" fill="{BG}"/>
   <text x="0" y="{TITLE_Y}" fill="{TEXT}" font-size="14" font-family="{FONT}">{total} contributions in the last year</text>
-  <text x="{width}" y="{TITLE_Y}" text-anchor="end" fill="{MUTED}" font-size="10" font-family="{FONT}">GitHub official + branch-only extras ({branch_total})</text>
+  <text x="{width}" y="{TITLE_Y}" text-anchor="end" fill="{MUTED}" font-size="10" font-family="{FONT}">GitHub official + branch-only extras ({branch_total}) across {repo_count} repos</text>
   {month_labels}
   {weekday_labels}
   {rects}
@@ -236,11 +293,13 @@ def render_svg(days: list[dict[str, int | date]], username: str) -> str:
 def main() -> None:
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     username = get_username()
+    scan_root = Path(os.environ.get("BRANCH_SCAN_ROOT", str(Path.home()))).expanduser().resolve()
     official = fetch_official_contributions(username)
-    branch_only = get_branch_only_counts()
+    branch_only, repos = get_branch_only_counts(scan_root)
     days = build_days(official, branch_only)
-    OUTPUT_PATH.write_text(render_svg(days, username), encoding="utf-8")
+    OUTPUT_PATH.write_text(render_svg(days, username, len(repos)), encoding="utf-8")
     print(f"Wrote {OUTPUT_PATH}")
+    print(f"Scanned {len(repos)} repos under {scan_root}")
 
 
 if __name__ == "__main__":
