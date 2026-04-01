@@ -9,3 +9,7 @@ This graph keeps the normal public contribution history and adds branch-only com
 ## Update
 
 Run `./scripts/update_profile_graph.sh` to regenerate the SVG and push the profile repo in one command.
+
+## Exclude Paths
+
+Edit `.branch-scan-ignore` to skip repos or folders from the local crawl.

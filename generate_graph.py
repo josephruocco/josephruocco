@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import date, timedelta
 from html import unescape
 from pathlib import Path
+import fnmatch
 import os
 import re
 import subprocess
@@ -13,6 +14,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parent
 ASSETS_DIR = ROOT / "assets"
 OUTPUT_PATH = ASSETS_DIR / "branch-contributions.svg"
+EXCLUDE_FILE = ROOT / ".branch-scan-ignore"
 DAYS = 365
 CELL = 11
 GAP = 4
@@ -96,13 +98,45 @@ def fetch_official_contributions(username: str) -> dict[str, int]:
     return counts
 
 
-def iter_repo_roots(scan_root: Path) -> list[Path]:
+def load_exclude_patterns() -> list[str]:
+    if not EXCLUDE_FILE.exists():
+        return []
+    return [line.strip() for line in EXCLUDE_FILE.read_text().splitlines() if line.strip() and not line.strip().startswith("#")]
+
+
+def is_excluded(path: Path, scan_root: Path, patterns: list[str]) -> bool:
+    try:
+        rel = path.resolve().relative_to(scan_root.resolve())
+        rel_str = rel.as_posix()
+    except ValueError:
+        rel_str = path.resolve().as_posix()
+
+    full_str = path.resolve().as_posix()
+    for pattern in patterns:
+        if fnmatch.fnmatch(rel_str, pattern) or fnmatch.fnmatch(full_str, pattern):
+            return True
+    return False
+
+
+def iter_repo_roots(scan_root: Path, exclude_patterns: list[str]) -> list[Path]:
     repos: list[Path] = []
     seen: set[Path] = set()
 
     for current_root, dirnames, _ in os.walk(scan_root):
         current = Path(current_root)
-        dirnames[:] = [name for name in dirnames if name not in PRUNE_DIRS]
+        filtered: list[str] = []
+        for name in dirnames:
+            if name in PRUNE_DIRS:
+                continue
+            candidate = current / name
+            if is_excluded(candidate, scan_root, exclude_patterns):
+                continue
+            filtered.append(name)
+        dirnames[:] = filtered
+
+        if is_excluded(current, scan_root, exclude_patterns):
+            dirnames[:] = []
+            continue
 
         if ".git" in dirnames:
             resolved = current.resolve()
@@ -147,7 +181,8 @@ def get_branch_only_counts_for_repo(repo_path: Path) -> Counter[str]:
 
 def get_branch_only_counts(scan_root: Path) -> tuple[Counter[str], list[Path]]:
     combined: Counter[str] = Counter()
-    repos = iter_repo_roots(scan_root)
+    exclude_patterns = load_exclude_patterns()
+    repos = iter_repo_roots(scan_root, exclude_patterns)
     for repo_path in repos:
         try:
             combined.update(get_branch_only_counts_for_repo(repo_path))

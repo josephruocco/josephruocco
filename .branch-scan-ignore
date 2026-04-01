@@ -1,0 +1,5 @@
+# One pattern per line. Matches relative to /Users/josephruocco and full paths.
+# Examples:
+# Downloads/*
+# */node_modules/*
+# work/private-repo
