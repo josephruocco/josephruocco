@@ -1,7 +1,3 @@
 # Joseph Ruocco
 
-Official GitHub contributions plus extra branch-only commits from local repos on this machine, rendered in a GitHub-style dark heatmap.
-
-![Branch contributions](assets/branch-contributions.svg)
-
- 
+Currently I'm a graduate student, before this I worked professionally as a developer. In my free time I work on independent projects that mix programming with creativity and exploration. See latest updates below. Based in Brooklyn, NY.
